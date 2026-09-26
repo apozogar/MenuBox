@@ -1040,6 +1040,7 @@ async function cookidooLogin(email, password) {
           ? (formAction.startsWith('http') ? formAction : new URL(formAction, currentUrl).toString())
           : CIAM_LOGIN_SRV_URL;
         dbg('form action found =', formAction, '-> posting to', postUrl);
+        const postOrigin = new URL(postUrl).origin;
         const loginData = new URLSearchParams({ requestId, username: email, password });
         const authRes = await fetch(postUrl, {
           method: 'POST',
@@ -1048,14 +1049,22 @@ async function cookidooLogin(email, password) {
           headers: {
             ...COOKIDOO_BROWSER_HEADERS,
             'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            Origin: new URL(currentUrl).origin,
+            Referer: currentUrl,
+            'Sec-Fetch-Site': new URL(currentUrl).origin === postOrigin ? 'same-origin' : 'same-site',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
             Cookie: makeCookieHeader(jar),
           },
         });
         mergeCookies(jar, parseCookies(authRes));
         dbg('POST auth ->', authRes.status, authRes.headers.get('location'), 'cookies:', Object.keys(jar));
-        if (!authRes.headers.get('location') && authRes.status === 200) {
+        if (!authRes.headers.get('location')) {
           const authHtml = await authRes.text();
-          dbg('auth response snippet:', authHtml.slice(0, 500).replace(/\s+/g, ' '));
+          dbg('auth response snippet:', authHtml.slice(0, 800).replace(/\s+/g, ' '));
         }
         let postLocation = authRes.headers.get('location');
         let lastUrl = postUrl;
