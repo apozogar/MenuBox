@@ -1017,7 +1017,8 @@ async function cookidooLogin(email, password) {
 
   while (location && redirectCount < maxRedirects) {
     redirectCount++;
-    const redirectRes = await fetch(location.startsWith('http') ? location : `https://cookidoo.${country}${location}`, {
+    const currentUrl = location.startsWith('http') ? location : `https://cookidoo.${country}${location}`;
+    const redirectRes = await fetch(currentUrl, {
       redirect: 'manual',
       headers: location.includes('ciam') ? COOKIDOO_BROWSER_HEADERS : { ...COOKIDOO_BROWSER_HEADERS, Cookie: makeCookieHeader(jar) },
     });
@@ -1033,8 +1034,14 @@ async function cookidooLogin(email, password) {
       }
       if (match) {
         const requestId = match[1];
+        const formActionMatch = html.match(/<form[^>]*action=["']([^"']+)["']/i);
+        const formAction = formActionMatch ? formActionMatch[1].replace(/&amp;/g, '&') : null;
+        const postUrl = formAction
+          ? (formAction.startsWith('http') ? formAction : new URL(formAction, currentUrl).toString())
+          : CIAM_LOGIN_SRV_URL;
+        dbg('form action found =', formAction, '-> posting to', postUrl);
         const loginData = new URLSearchParams({ requestId, username: email, password });
-        const authRes = await fetch(CIAM_LOGIN_SRV_URL, {
+        const authRes = await fetch(postUrl, {
           method: 'POST',
           redirect: 'manual',
           body: loginData.toString(),
@@ -1051,15 +1058,18 @@ async function cookidooLogin(email, password) {
           dbg('auth response snippet:', authHtml.slice(0, 500).replace(/\s+/g, ' '));
         }
         let postLocation = authRes.headers.get('location');
+        let lastUrl = postUrl;
         let postCount = 0;
         while (postLocation && postCount < maxRedirects) {
           postCount++;
-          const postRes = await fetch(postLocation.startsWith('http') ? postLocation : `https://cookidoo.${country}${postLocation}`, {
+          const nextUrl = postLocation.startsWith('http') ? postLocation : new URL(postLocation, lastUrl).toString();
+          const postRes = await fetch(nextUrl, {
             redirect: 'manual',
             headers: { ...COOKIDOO_BROWSER_HEADERS, Cookie: makeCookieHeader(jar) },
           });
           mergeCookies(jar, parseCookies(postRes));
           dbg('post-auth redirect', postCount, postLocation, '->', postRes.status, postRes.headers.get('location'), 'cookies:', Object.keys(jar));
+          lastUrl = nextUrl;
           postLocation = postRes.headers.get('location');
         }
         if (!jar['_oauth2_proxy'] && !jar['v-authenticated']) {
