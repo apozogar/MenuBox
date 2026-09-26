@@ -1006,8 +1006,11 @@ async function cookidooLogin(email, password) {
   const jar = cookidooCookieJars.get(jarKey) || {};
   cookidooCookieJars.set(jarKey, jar);
 
+  const dbg = (...args) => console.log('[cookidoo-login]', ...args);
+
   const loginUrl = `https://cookidoo.${country}/profile/${language}/login?redirectAfterLogin=%2Ffoundation%2F${language}%2Ffor-you`;
   const loginRes = await fetch(loginUrl, { redirect: 'manual', headers: COOKIDOO_BROWSER_HEADERS });
+  dbg('GET login page ->', loginRes.status, loginRes.headers.get('location'));
   let location = loginRes.headers.get('location');
   let redirectCount = 0;
   const maxRedirects = 10;
@@ -1019,10 +1022,15 @@ async function cookidooLogin(email, password) {
       headers: location.includes('ciam') ? COOKIDOO_BROWSER_HEADERS : { ...COOKIDOO_BROWSER_HEADERS, Cookie: makeCookieHeader(jar) },
     });
     mergeCookies(jar, parseCookies(redirectRes));
+    dbg('redirect', redirectCount, location, '->', redirectRes.status, redirectRes.headers.get('location'), 'cookies:', Object.keys(jar));
     location = redirectRes.headers.get('location');
     if (!location && redirectRes.status === 200) {
       const html = await redirectRes.text();
       const match = html.match(/<input[^>]*name=["']requestId["'][^>]*value=["']([^"']+)["']/);
+      dbg('login page body: requestId found =', !!match, 'length =', html.length);
+      if (!match) {
+        dbg('login page snippet:', html.slice(0, 500).replace(/\s+/g, ' '));
+      }
       if (match) {
         const requestId = match[1];
         const loginData = new URLSearchParams({ requestId, username: email, password });
@@ -1037,6 +1045,11 @@ async function cookidooLogin(email, password) {
           },
         });
         mergeCookies(jar, parseCookies(authRes));
+        dbg('POST auth ->', authRes.status, authRes.headers.get('location'), 'cookies:', Object.keys(jar));
+        if (!authRes.headers.get('location') && authRes.status === 200) {
+          const authHtml = await authRes.text();
+          dbg('auth response snippet:', authHtml.slice(0, 500).replace(/\s+/g, ' '));
+        }
         let postLocation = authRes.headers.get('location');
         let postCount = 0;
         while (postLocation && postCount < maxRedirects) {
@@ -1046,9 +1059,11 @@ async function cookidooLogin(email, password) {
             headers: { ...COOKIDOO_BROWSER_HEADERS, Cookie: makeCookieHeader(jar) },
           });
           mergeCookies(jar, parseCookies(postRes));
+          dbg('post-auth redirect', postCount, postLocation, '->', postRes.status, postRes.headers.get('location'), 'cookies:', Object.keys(jar));
           postLocation = postRes.headers.get('location');
         }
         if (!jar['_oauth2_proxy'] && !jar['v-authenticated']) {
+          dbg('FAILED - final cookie jar keys:', Object.keys(jar));
           throw new Error('No se recibieron cookies de autenticación. Credenciales incorrectas.');
         }
         return;
