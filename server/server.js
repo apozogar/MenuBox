@@ -975,13 +975,13 @@ const cookidooCookieJars = new Map();
 
 function parseCookies(res) {
   const cookies = {};
-  const setCookie = res.headers.get('set-cookie');
-  if (setCookie) {
-    setCookie.split(',').forEach(part => {
-      const match = part.match(/^([^=]+)=([^;]+)/);
-      if (match) cookies[match[1].trim()] = match[2].trim();
-    });
-  }
+  const setCookieLines = typeof res.headers.getSetCookie === 'function'
+    ? res.headers.getSetCookie()
+    : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')] : []);
+  setCookieLines.forEach(line => {
+    const match = line.match(/^([^=]+)=([^;]+)/);
+    if (match) cookies[match[1].trim()] = match[2].trim();
+  });
   return cookies;
 }
 
