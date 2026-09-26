@@ -36,6 +36,20 @@ async function initDatabase() {
     )
   `);
 
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS login_history (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      username TEXT NOT NULL,
+      success BOOLEAN NOT NULL,
+      ip TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   await query(`
     CREATE TABLE IF NOT EXISTS menus (
       id SERIAL PRIMARY KEY,
@@ -114,6 +128,7 @@ async function initDatabase() {
       ['admin', 'admin@menubox.app', hash]
     );
     const adminId = adminResult.rows[0].id;
+    await query("UPDATE users SET is_superadmin = TRUE WHERE id = $1", [adminId]);
     console.log('👤 Usuario admin creado (admin / admin123)');
 
     const menuResult = await query(
@@ -127,6 +142,7 @@ async function initDatabase() {
     );
     console.log('📋 Menú por defecto creado con id', menuId);
   } else {
+    await query("UPDATE users SET is_superadmin = TRUE WHERE id = $1", [existing.rows[0].id]);
     console.log('👤 Usuario admin ya existe (id:', existing.rows[0].id, ')');
   }
 }

@@ -2,7 +2,7 @@ import { Component, OnInit, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, Router } from '@angular/router';
-import { AuthService, Menu } from './services/auth.service';
+import { AuthService, Menu, User } from './services/auth.service';
 import { ToastService } from './services/toast.service';
 import { ConfirmService } from './services/confirm.service';
 import { ToastContainer } from './components/toast-container/toast-container';
@@ -15,17 +15,24 @@ import { ConfirmModal } from './components/confirm-modal/confirm-modal';
   styleUrl: './app.css',
 })
 export class App implements OnInit {
-  user: { username: string } | null = null;
+  user: User | null = null;
   menus: Menu[] = [];
   currentMenuId = 1;
   isDark = false;
 
-  navItems = [
+  baseNavItems = [
     { path: '/', label: 'Calendario', icon: '📅' },
     { path: '/recipes', label: 'Recetas', icon: '📖' },
     { path: '/shopping-list', label: 'Compra', icon: '🛒' },
     { path: '/settings', label: 'Ajustes', icon: '⚙️' },
   ];
+
+  get navItems() {
+    if (this.user?.isSuperadmin) {
+      return [...this.baseNavItems, { path: '/admin/activity', label: 'Actividad', icon: '🕵️' }];
+    }
+    return this.baseNavItems;
+  }
 
   showMenuDropdown = false;
   showMenuModal = false;

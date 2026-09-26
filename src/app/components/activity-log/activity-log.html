@@ -1,0 +1,54 @@
+<header>
+  <h1>🕵️ Actividad de usuarios</h1>
+</header>
+
+<div class="activity-toolbar">
+  <input
+    type="text"
+    [(ngModel)]="usernameFilter"
+    placeholder="Filtrar por usuario o email"
+    (keyup.enter)="search()"
+  />
+  <button class="btn-test" (click)="search()">Buscar</button>
+</div>
+
+<div class="activity-table-wrap">
+  <table class="activity-table">
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Usuario</th>
+        <th>Email</th>
+        <th>Resultado</th>
+        <th>IP</th>
+        <th>Dispositivo</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngFor="let e of entries">
+        <td>{{ e.created_at | date: 'dd/MM/yyyy HH:mm:ss' }}</td>
+        <td>{{ e.username }}</td>
+        <td>{{ e.email || '—' }}</td>
+        <td>
+          <span class="badge" [class.ok]="e.success" [class.fail]="!e.success">
+            {{ e.success ? '✅ Éxito' : '❌ Fallo' }}
+          </span>
+        </td>
+        <td>{{ e.ip || '—' }}</td>
+        <td class="ua-cell" [title]="e.user_agent">{{ e.user_agent || '—' }}</td>
+      </tr>
+      <tr *ngIf="!loading && entries.length === 0">
+        <td colspan="6" class="empty">No hay entradas de acceso.</td>
+      </tr>
+      <tr *ngIf="loading">
+        <td colspan="6" class="empty">Cargando...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="activity-pagination">
+  <button (click)="prevPage()" [disabled]="offset === 0 || loading">← Anterior</button>
+  <span>{{ pageLabel }}</span>
+  <button (click)="nextPage()" [disabled]="offset + pageSize >= total || loading">Siguiente →</button>
+</div>

@@ -15,6 +15,8 @@ const JWT_SECRET = db.JWT_SECRET || process.env.JWT_SECRET || 'change-me';
 const app = express();
 const port = 3000;
 
+app.set('trust proxy', 1);
+
 // Load seed recipes (safe fallback if file missing)
 let seedRecipes = [];
 try {
@@ -174,28 +176,51 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return req.ip || '';
+}
+
+async function logLoginAttempt({ userId, username, success, req }) {
+  try {
+    await query(
+      "INSERT INTO login_history (user_id, username, success, ip, user_agent) VALUES ($1, $2, $3, $4, $5)",
+      [userId || null, username, success, getClientIp(req), req.headers['user-agent'] || '']
+    );
+  } catch (e) {
+    console.error('Error registrando historial de acceso:', e.message);
+  }
+}
+
 app.post('/api/auth/login', async (req, res) => {
   const result = validate(loginSchema, req.body);
   if (result.error) return res.status(400).json({ error: result.error });
   const { username, password } = result.data;
   try {
     const { rows } = await query(
-      "SELECT id, username, email, password_hash FROM users WHERE username = $1 OR email = $1",
+      "SELECT id, username, email, password_hash, is_superadmin FROM users WHERE username = $1 OR email = $1",
       [username]
     );
     if (rows.length === 0) {
+      await logLoginAttempt({ userId: null, username, success: false, req });
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
     const row = rows[0];
     if (!bcrypt.compareSync(password, row.password_hash)) {
+      await logLoginAttempt({ userId: row.id, username: row.username, success: false, req });
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
+    await logLoginAttempt({ userId: row.id, username: row.username, success: true, req });
     const token = jwt.sign(
       { userId: row.id, username: row.username, email: row.email },
       JWT_SECRET,
       { expiresIn: '30d' },
     );
-    res.json({ token, user: { id: row.id, username: row.username, email: row.email } });
+    res.json({
+      token,
+      user: { id: row.id, username: row.username, email: row.email, isSuperadmin: row.is_superadmin },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -204,11 +229,60 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/profile', authMiddleware, async (req, res) => {
   try {
     const { rows } = await query(
-      "SELECT id, username, email, created_at FROM users WHERE id = $1",
+      "SELECT id, username, email, created_at, is_superadmin AS \"isSuperadmin\" FROM users WHERE id = $1",
       [req.user.userId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+async function superadminMiddleware(req, res, next) {
+  try {
+    const { rows } = await query("SELECT is_superadmin FROM users WHERE id = $1", [req.user.userId]);
+    if (rows.length === 0 || !rows[0].is_superadmin) {
+      return res.status(403).json({ error: 'Acceso restringido a superadministradores' });
+    }
+    next();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
+app.get('/api/admin/login-history', authMiddleware, superadminMiddleware, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const usernameFilter = (req.query.username || '').trim();
+
+    const params = [];
+    let where = '';
+    if (usernameFilter) {
+      params.push(`%${usernameFilter}%`);
+      where = `WHERE lh.username ILIKE $${params.length}`;
+    }
+
+    params.push(limit, offset);
+    const { rows } = await query(
+      `SELECT lh.id, lh.user_id, lh.username, lh.success, lh.ip, lh.user_agent, lh.created_at, u.email
+       FROM login_history lh
+       LEFT JOIN users u ON u.id = lh.user_id
+       ${where}
+       ORDER BY lh.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    const countParams = usernameFilter ? [`%${usernameFilter}%`] : [];
+    const countWhere = usernameFilter ? 'WHERE username ILIKE $1' : '';
+    const { rows: countRows } = await query(
+      `SELECT COUNT(*) FROM login_history ${countWhere}`,
+      countParams
+    );
+
+    res.json({ entries: rows, total: parseInt(countRows[0].count) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -881,6 +955,11 @@ app.post('/api/mercadona/search', authMiddleware, async (req, res) => {
 
 const CIAM_LOGIN_SRV_URL = 'https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login';
 
+const COOKIDOO_BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+};
+
 async function getSettings(keys) {
   const placeholders = keys.map((_, i) => `$${i + 1}`).join(',');
   const { rows } = await query(
@@ -928,7 +1007,7 @@ async function cookidooLogin(email, password) {
   cookidooCookieJars.set(jarKey, jar);
 
   const loginUrl = `https://cookidoo.${country}/profile/${language}/login?redirectAfterLogin=%2Ffoundation%2F${language}%2Ffor-you`;
-  const loginRes = await fetch(loginUrl, { redirect: 'manual' });
+  const loginRes = await fetch(loginUrl, { redirect: 'manual', headers: COOKIDOO_BROWSER_HEADERS });
   let location = loginRes.headers.get('location');
   let redirectCount = 0;
   const maxRedirects = 10;
@@ -937,7 +1016,7 @@ async function cookidooLogin(email, password) {
     redirectCount++;
     const redirectRes = await fetch(location.startsWith('http') ? location : `https://cookidoo.${country}${location}`, {
       redirect: 'manual',
-      headers: location.includes('ciam') ? {} : { Cookie: makeCookieHeader(jar) },
+      headers: location.includes('ciam') ? COOKIDOO_BROWSER_HEADERS : { ...COOKIDOO_BROWSER_HEADERS, Cookie: makeCookieHeader(jar) },
     });
     mergeCookies(jar, parseCookies(redirectRes));
     location = redirectRes.headers.get('location');
@@ -951,7 +1030,11 @@ async function cookidooLogin(email, password) {
           method: 'POST',
           redirect: 'manual',
           body: loginData.toString(),
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          headers: {
+            ...COOKIDOO_BROWSER_HEADERS,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Cookie: makeCookieHeader(jar),
+          },
         });
         mergeCookies(jar, parseCookies(authRes));
         let postLocation = authRes.headers.get('location');
@@ -960,7 +1043,7 @@ async function cookidooLogin(email, password) {
           postCount++;
           const postRes = await fetch(postLocation.startsWith('http') ? postLocation : `https://cookidoo.${country}${postLocation}`, {
             redirect: 'manual',
-            headers: { Cookie: makeCookieHeader(jar) },
+            headers: { ...COOKIDOO_BROWSER_HEADERS, Cookie: makeCookieHeader(jar) },
           });
           mergeCookies(jar, parseCookies(postRes));
           postLocation = postRes.headers.get('location');
@@ -1031,6 +1114,7 @@ app.get('/api/cookidoo/search', async (req, res) => {
     const searchUrl = `https://cookidoo.${country}/search/${locale}?query=${encodeURIComponent(q)}&pageSize=15`;
     const apiRes = await fetch(searchUrl, {
       headers: {
+        ...COOKIDOO_BROWSER_HEADERS,
         Accept: 'application/json',
         Cookie: makeCookieHeader(jar),
       },
@@ -1102,6 +1186,7 @@ app.post('/api/cookidoo/predefined', async (req, res) => {
         const searchUrl = `https://cookidoo.${country}/search/${locale}?query=${encodeURIComponent(s.term)}&pageSize=4`;
         const apiRes = await fetch(searchUrl, {
           headers: {
+            ...COOKIDOO_BROWSER_HEADERS,
             Accept: 'application/json',
             Cookie: makeCookieHeader(jar),
           },
@@ -1168,6 +1253,7 @@ app.post('/api/cookidoo/add-to-shopping-list', async (req, res) => {
     const apiRes = await fetch(`https://cookidoo.${country}/shopping/${language}/recipes/add`, {
       method: 'POST',
       headers: {
+        ...COOKIDOO_BROWSER_HEADERS,
         'Content-Type': 'application/json',
         Accept: 'application/json',
         Cookie: makeCookieHeader(jar),
@@ -1213,6 +1299,7 @@ app.post('/api/cookidoo/add-to-calendar', async (req, res) => {
         const apiRes = await fetch(`https://${country}.tmmobile.vorwerk-digital.com/planning/${language}/api/my-day`, {
           method: 'PUT',
           headers: {
+            ...COOKIDOO_BROWSER_HEADERS,
             'Content-Type': 'application/json',
             Accept: 'application/json',
             ...(jar['v-token']

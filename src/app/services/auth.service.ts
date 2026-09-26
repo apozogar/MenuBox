@@ -8,6 +8,18 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  isSuperadmin?: boolean;
+}
+
+export interface LoginHistoryEntry {
+  id: number;
+  user_id: number | null;
+  username: string;
+  success: boolean;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+  email: string | null;
 }
 
 export interface Menu {
@@ -54,6 +66,26 @@ export class AuthService {
 
   getUser(): User | null {
     return this.userSubject.value;
+  }
+
+  isSuperadmin(): boolean {
+    return !!this.userSubject.value?.isSuperadmin;
+  }
+
+  async getLoginHistory(params: { username?: string; limit?: number; offset?: number } = {}): Promise<{ entries: LoginHistoryEntry[]; total: number }> {
+    try {
+      let query = '';
+      const parts: string[] = [];
+      if (params.username) parts.push(`username=${encodeURIComponent(params.username)}`);
+      if (params.limit) parts.push(`limit=${params.limit}`);
+      if (params.offset) parts.push(`offset=${params.offset}`);
+      if (parts.length) query = '?' + parts.join('&');
+      return await this.requestWithTimeout(
+        this.http.get<{ entries: LoginHistoryEntry[]; total: number }>(`${this.apiUrl}/admin/login-history${query}`),
+      );
+    } catch {
+      return { entries: [], total: 0 };
+    }
   }
 
   getCurrentMenuId(): number {
