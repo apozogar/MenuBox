@@ -624,6 +624,45 @@ app.post('/api/calendar', authMiddleware, async (req, res) => {
 
 // === GENERACIÓN IA (Gemini) ===
 
+const GROQ_MODELS_TTL_MS = 6 * 60 * 60 * 1000;
+const GROQ_EXCLUDED_MODELS = /whisper|tts|playai|orpheus|guard|embed|compound|allam/i;
+const GROQ_PREFERRED_MODELS = [
+  /llama-3\.3-70b/i,
+  /gpt-oss-120b/i,
+  /llama-4-maverick/i,
+  /kimi-k2/i,
+  /qwen/i,
+  /gpt-oss-20b/i,
+  /llama-4-scout/i,
+  /llama-3\.1-8b/i,
+];
+const groqModelsCache = new Map();
+
+async function getGroqChatModels(apiKey) {
+  const cached = groqModelsCache.get(apiKey);
+  if (cached && Date.now() - cached.at < GROQ_MODELS_TTL_MS) return cached.models;
+
+  const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!modelsRes.ok) {
+    const err = await modelsRes.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${modelsRes.status}`);
+  }
+  const { data = [] } = await modelsRes.json();
+  const rank = (id) => {
+    const i = GROQ_PREFERRED_MODELS.findIndex(re => re.test(id));
+    return i === -1 ? GROQ_PREFERRED_MODELS.length : i;
+  };
+  const models = data
+    .filter(m => m.active !== false && !GROQ_EXCLUDED_MODELS.test(m.id))
+    .sort((a, b) => rank(a.id) - rank(b.id) || (b.context_window || 0) - (a.context_window || 0));
+
+  console.log('[Groq] modelos disponibles:', models.map(m => m.id).join(', '));
+  groqModelsCache.set(apiKey, { at: Date.now(), models });
+  return models;
+}
+
 app.post('/api/menu/generate-ai', authMiddleware, async (req, res) => {
   const { month, year, startDay } = req.body;
   const menuId = parseInt(req.query.menuId) || 1;
@@ -775,49 +814,69 @@ Responde solo esto, sin markdown ni backticks:
       }
     }
 
-    // Fallback: Groq
     if (groqKey) {
+      let models;
       try {
-        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${groqKey}`,
-          },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-              { role: 'system', content: 'Eres un nutricionista. Responde ÚNICAMENTE con un array JSON válido, sin explicaciones, sin markdown, sin backticks. Nada de texto fuera del JSON. Solo el array.' },
-              { role: 'user', content: prompt },
-            ],
-            temperature: 0.7,
-            max_tokens: 8192,
-          }),
-        });
-
-        if (groqRes.ok) {
-          const groqData = await groqRes.json();
-          const text = groqData?.choices?.[0]?.message?.content || '';
-          const finishReason = groqData?.choices?.[0]?.finish_reason || '';
-          console.log('[Groq] finishReason:', finishReason, 'textLen:', text.length);
-          console.log('[Groq] text preview:', text.slice(0, 300));
-
-          const result = parseResponse(text, 'Groq');
-          if (result.days) {
-            return res.json({ days: result.days, month, year, provider: 'groq' });
-          }
-          return res.status(500).json({ error: result.error });
-        }
-
-        if (groqRes.status === 429) {
-          return res.status(429).json({ error: 'Límite de Groq alcanzado. Espera unos segundos.' });
-        }
-
-        const groqErr = await groqRes.json().catch(() => ({}));
-        return res.status(502).json({ error: 'Error Groq: ' + (groqErr?.error?.message || `HTTP ${groqRes.status}`) });
+        models = await getGroqChatModels(groqKey);
       } catch (e) {
-        return res.status(500).json({ error: 'Error de red Groq: ' + e.message });
+        return res.status(502).json({ error: 'Error Groq al listar modelos: ' + e.message });
       }
+      if (models.length === 0) {
+        return res.status(502).json({ error: 'Groq no tiene ningún modelo de chat disponible ahora mismo.' });
+      }
+
+      let lastError = { status: 502, error: 'Error Groq' };
+      for (const model of models.slice(0, 5)) {
+        try {
+          const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${groqKey}`,
+            },
+            body: JSON.stringify({
+              model: model.id,
+              messages: [
+                { role: 'system', content: 'Eres un nutricionista. Responde ÚNICAMENTE con un array JSON válido, sin explicaciones, sin markdown, sin backticks. Nada de texto fuera del JSON. Solo el array.' },
+                { role: 'user', content: prompt },
+              ],
+              temperature: 0.7,
+              max_tokens: Math.min(8192, model.max_completion_tokens || 8192),
+            }),
+          });
+
+          if (groqRes.ok) {
+            const groqData = await groqRes.json();
+            const text = groqData?.choices?.[0]?.message?.content || '';
+            const finishReason = groqData?.choices?.[0]?.finish_reason || '';
+            console.log('[Groq]', model.id, 'finishReason:', finishReason, 'textLen:', text.length);
+
+            const result = parseResponse(text, 'Groq');
+            if (result.days) {
+              return res.json({ days: result.days, month, year, provider: 'groq', model: model.id });
+            }
+            lastError = { status: 500, error: result.error };
+            continue;
+          }
+
+          const groqErr = await groqRes.json().catch(() => ({}));
+          const message = groqErr?.error?.message || `HTTP ${groqRes.status}`;
+          console.log('[Groq]', model.id, 'HTTP', groqRes.status, message);
+
+          if (groqRes.status === 401) {
+            return res.status(401).json({ error: 'API Key de Groq no válida. Revísala en Ajustes.' });
+          }
+          if (groqRes.status === 404 || /decommissioned|not found|does not exist/i.test(message)) {
+            groqModelsCache.delete(groqKey);
+          }
+          lastError = groqRes.status === 429
+            ? { status: 429, error: 'Límite de Groq alcanzado. Espera unos segundos.' }
+            : { status: 502, error: `Error Groq (${model.id}): ${message}` };
+        } catch (e) {
+          lastError = { status: 500, error: 'Error de red Groq: ' + e.message };
+        }
+      }
+      return res.status(lastError.status).json({ error: lastError.error });
     }
 
     return res.status(500).json({ error: 'No se pudo generar el menú con ningún proveedor. Revisa las API keys.' });
