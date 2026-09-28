@@ -63,7 +63,7 @@
     <p class="desc">API Key para generar menús equilibrados con IA. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Consíguela aquí</a> (gratis, 1500 peticiones/día).</p>
     <label>
       API Key
-      <input type="password" [(ngModel)]="geminiApiKey" placeholder="AIzaSy..." />
+      <input type="text" [(ngModel)]="geminiApiKey" placeholder="AIzaSy..." />
     </label>
   </section>
 
@@ -72,14 +72,8 @@
     <p class="desc">Alternativa gratuita con más capacidad. <a href="https://console.groq.com/keys" target="_blank" rel="noopener">Consigue tu API Key aquí</a>. Se usa como fallback si Gemini falla por límite de tokens.</p>
     <label>
       API Key
-      <input type="password" [(ngModel)]="groqApiKey" placeholder="gsk_..." />
+      <input type="text" [(ngModel)]="groqApiKey" placeholder="gsk_..." />
     </label>
-  </section>
-
-  <section class="card">
-    <h2>🛍️ Mercadona</h2>
-    <p class="desc">La búsqueda de productos en Mercadona está disponible desde el calendario y la lista de la compra.</p>
-    <p class="hint">No requiere inicio de sesión.</p>
   </section>
 
 </div>

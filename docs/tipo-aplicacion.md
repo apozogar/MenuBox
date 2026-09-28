@@ -1,10 +1,10 @@
 # Tipo de Aplicación
 
-**MenuBox** es una aplicación web **SPA (Single Page Application)** de planificación semanal de comidas, orientada a usuarios de **Thermomix** y **Mercadona**.
+**MenuBox** es una aplicación web **SPA (Single Page Application)** de planificación semanal de comidas, orientada a usuarios de **Thermomix**.
 
 ## Propósito
 
-Generar y gestionar menús semanales de forma automática o manual, sincronizar las recetas con la lista de la compra de Cookidoo (Thermomix) y añadir los ingredientes al carrito de la compra online de Mercadona.
+Generar y gestionar menús semanales de forma automática o manual, sincronizar las recetas con la lista de la compra de Cookidoo (Thermomix).
 
 ## Tecnologías Principales
 
@@ -21,4 +21,3 @@ Generar y gestionar menús semanales de forma automática o manual, sincronizar 
 ## Integraciones Externas
 
 - **Cookidoo API** — Búsqueda de recetas, lista de la compra y agenda del Thermomix
-- **Mercadona API** — Búsqueda de productos y actualización del carrito online (vía Algolia y API pública)

@@ -24,7 +24,6 @@
   - `AuthService` — Autenticación JWT, gestión de menús, estado de sesión
   - `MenuService` — API calls para recetas, calendario, ingredientes y ajustes
   - `Thermomix` — Integración con Cookidoo (lista de la compra y agenda)
-  - `MercadonaService` — Búsqueda de productos y carrito de Mercadona
   - `ToastService` / `ConfirmService` — Notificaciones y modales de confirmación
 - **Interceptor HTTP**: `AuthInterceptor` — Añade el token JWT a todas las peticiones
 
@@ -42,8 +41,6 @@
   - `GET/POST /api/recipes/:id/ingredients` — Ingredientes por receta
   - `GET /api/recipes/:id/ingredients/scrape` — Scraping desde Cookidoo
   - `GET /api/ingredients/from-calendar` — Ingredientes agregados del mes
-  - `POST /api/mercadona/search` — Búsqueda en Mercadona vía Algolia
-  - `POST /api/mercadona/cart/add` — Añadir productos al carrito online
   - `POST /api/cookidoo/login` — Login en Cookidoo
   - `GET /api/cookidoo/search` — Búsqueda de recetas en Cookidoo
   - `POST /api/cookidoo/add-to-shopping-list` — Añadir a lista de la compra

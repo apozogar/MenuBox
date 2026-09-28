@@ -25,8 +25,7 @@ Automatizar la planificación semanal de comidas siguiendo una **pizarra de tipo
 5. **Edición Manual** — Pinchar en un día para cambiar la receta de comida o cena
 6. **Sincronización con Thermomix** — Añadir recetas a la lista de la compra y a la agenda de Cookidoo
 7. **Scraping de Ingredientes** — Extraer ingredientes desde la web de Cookidoo
-8. **Conexión con Mercadona** — Buscar ingredientes como productos y añadirlos al carrito online
-9. **Guardar Ajustes** — Credenciales de Cookidoo y Mercadona persistentes en la BBDD
+8. **Guardar Ajustes** — Credenciales de Cookidoo y API keys de IA persistentes en la BBDD
 
 ## Hoja de Ruta / Posibles Mejoras
 

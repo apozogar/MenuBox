@@ -1,6 +1,6 @@
 # MenuBox
 
-App web SPA (Angular 21 + Express + PostgreSQL) para planificación semanal de comidas, integrada con Thermomix (Cookidoo) y Mercadona.
+App web SPA (Angular 21 + Express + PostgreSQL) para planificación semanal de comidas, integrada con Thermomix (Cookidoo).
 
 ## Stack
 
@@ -31,19 +31,18 @@ menubox/
 │   │   │   ├── auth.interceptor.ts  # Añade token Bearer a peticiones
 │   │   │   ├── menu.service.ts      # API calls: recipes, calendar, ingredients, settings
 │   │   │   ├── thermomix.ts         # Integración Cookidoo (shopping list + agenda TM6)
-│   │   │   ├── mercadona.service.ts # Búsqueda y carrito Mercadona
 │   │   │   ├── toast.service.ts     # Notificaciones toast
 │   │   │   └── confirm.service.ts   # Modal de confirmación
 │   │   └── components/
 │   │       ├── calendar/            # Calendario mensual con generación automática
 │   │       ├── recipe-manager/      # CRUD de recetas + búsqueda Cookidoo
-│   │       ├── settings/            # Ajustes: credenciales Cookidoo y Mercadona
+│   │       ├── settings/            # Ajustes: credenciales Cookidoo y API keys de IA
 │   │       ├── login/               # Login y registro
 │   │       ├── toast-container/     # Contenedor de toasts
 │   │       └── confirm-modal/       # Modal de confirmación
 ├── server/                      # Backend Express
 │   ├── server.js                # API REST (761 líneas): auth, menus, recipes, calendar,
-│   │                            #   ingredients/scrape, mercadona (search + cart),
+│   │                            #   ingredients/scrape,
 │   │                            #   cookidoo (login, search, shopping list, agenda)
 │   ├── database.js              # Pool PostgreSQL, init de tablas + admin por defecto
 │   ├── schema.sql               # Esquema SQL de referencia
@@ -79,8 +78,6 @@ Usuario por defecto: `admin` / `admin123`.
 | GET | /api/recipes/:id/ingredients | Opcional |
 | POST | /api/recipes/:id/ingredients | JWT |
 | GET | /api/recipes/:id/ingredients/scrape | JWT |
-| POST | /api/mercadona/search | JWT |
-| POST | /api/mercadona/cart/add | JWT |
 | POST | /api/cookidoo/login | No |
 | GET | /api/cookidoo/search | No |
 | POST | /api/cookidoo/add-to-shopping-list | No |

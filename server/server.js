@@ -633,9 +633,9 @@ app.post('/api/menu/generate-ai', authMiddleware, async (req, res) => {
   }
 
   try {
-    const settings = await getSettings(['gemini_api_key', 'groq_api_key']);
-    const geminiKey = settings.gemini_api_key;
-    const groqKey = settings.groq_api_key;
+    const settings = await getSettings(menuId, ['gemini_api_key', 'groq_api_key']);
+    const geminiKey = cleanApiKey(settings.gemini_api_key);
+    const groqKey = cleanApiKey(settings.groq_api_key);
 
     if (!geminiKey && !groqKey) {
       return res.status(400).json({ error: 'Configura al menos una API Key de IA en Ajustes (Gemini o Groq)' });
@@ -918,30 +918,6 @@ app.get('/api/ingredients/from-calendar', optionalAuth, async (req, res) => {
   }
 });
 
-// === MERCADONA ===
-
-app.post('/api/mercadona/search', authMiddleware, async (req, res) => {
-  const { query: searchQuery, warehouse = '146' } = req.body;
-  if (!searchQuery) return res.status(400).json({ error: 'query es requerido' });
-  try {
-    const index = `products_prod_${warehouse}_es`;
-    const algoliaRes = await fetch(`https://7uzjkl1dj0-dsn.algolia.net/1/indexes/${index}/query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Algolia-Application-Id': '7UZJKL1DJ0',
-        'X-Algolia-API-Key': '9d8f2e39e90df472b4f2e559a116fe17',
-      },
-      body: JSON.stringify({ query: searchQuery, hitsPerPage: 5 }),
-    });
-    if (!algoliaRes.ok) return res.status(502).json({ error: 'Error en búsqueda Mercadona' });
-    const data = await algoliaRes.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: 'Error al buscar: ' + e.message });
-  }
-});
-
 // === COOKIDOO ===
 
 const CIAM_LOGIN_SRV_URL = 'https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login';
@@ -951,11 +927,22 @@ const COOKIDOO_BROWSER_HEADERS = {
   'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
 };
 
-async function getSettings(keys) {
-  const placeholders = keys.map((_, i) => `$${i + 1}`).join(',');
+function cleanApiKey(value) {
+  return (value || '').replace(/[^\x21-\x7E]/g, '');
+}
+
+function cleanSettingValue(key, value) {
+  return key.endsWith('_api_key') && typeof value === 'string' ? cleanApiKey(value) : value;
+}
+
+function getMenuId(req) {
+  return parseInt(req.query.menuId) || 1;
+}
+
+async function getSettings(menuId, keys) {
   const { rows } = await query(
-    `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
-    keys
+    `SELECT key, value FROM settings WHERE menu_id = $1 AND key = ANY($2)`,
+    [menuId, keys]
   );
   const map = {};
   rows.forEach(r => map[r.key] = r.value);
@@ -988,8 +975,8 @@ function getCookieJarKey(email) {
   return `ck_${email}`;
 }
 
-async function cookidooLogin(email, password) {
-  const settings = await getSettings(['cookidoo_country', 'cookidoo_language']);
+async function cookidooLogin(menuId, email, password) {
+  const settings = await getSettings(menuId, ['cookidoo_country', 'cookidoo_language']);
   const country = settings.cookidoo_country || 'es';
   const language = settings.cookidoo_language || 'es-ES';
 
@@ -1083,27 +1070,28 @@ async function cookidooLogin(email, password) {
   throw new Error('No se pudo completar el login. Verifica tus credenciales.');
 }
 
-async function ensureCookidooAuth(email) {
+async function ensureCookidooAuth(menuId, email) {
   if (!email) {
-    const settings = await getSettings(['cookidoo_email']);
+    const settings = await getSettings(menuId, ['cookidoo_email']);
     email = settings.cookidoo_email;
   }
   if (!email) throw new Error('Configura el email de Cookidoo en Ajustes');
   const jarKey = getCookieJarKey(email);
   const jar = cookidooCookieJars.get(jarKey) || {};
   if (jar['_oauth2_proxy'] && jar['v-authenticated']) return jar;
-  const settings = await getSettings(['cookidoo_password']);
+  const settings = await getSettings(menuId, ['cookidoo_password']);
   const password = settings.cookidoo_password;
   if (!password) throw new Error('Configura la contraseña de Cookidoo en Ajustes');
-  await cookidooLogin(email, password);
+  await cookidooLogin(menuId, email, password);
   return cookidooCookieJars.get(jarKey);
 }
 
 app.post('/api/cookidoo/login', async (req, res) => {
+  const menuId = getMenuId(req);
   try {
     let { email, password } = req.body || {};
     if (!email || !password) {
-      const settings = await getSettings(['cookidoo_email', 'cookidoo_password']);
+      const settings = await getSettings(menuId, ['cookidoo_email', 'cookidoo_password']);
       email = settings.cookidoo_email;
       password = settings.cookidoo_password;
     }
@@ -1114,7 +1102,7 @@ app.post('/api/cookidoo/login', async (req, res) => {
     }
     const jarKey = getCookieJarKey(email);
     cookidooCookieJars.set(jarKey, {});
-    await cookidooLogin(email, password);
+    await cookidooLogin(menuId, email, password);
     res.json({ ok: true });
   } catch (e) {
     res.status(401).json({ error: e.message });
@@ -1122,16 +1110,17 @@ app.post('/api/cookidoo/login', async (req, res) => {
 });
 
 app.get('/api/cookidoo/search', async (req, res) => {
+  const menuId = getMenuId(req);
   const q = req.query.q;
   if (!q) return res.status(400).json({ error: 'Parámetro "q" requerido' });
   let jar;
   try {
-    jar = await ensureCookidooAuth();
+    jar = await ensureCookidooAuth(menuId);
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
   try {
-    const settings = await getSettings(['cookidoo_country', 'cookidoo_language']);
+    const settings = await getSettings(menuId, ['cookidoo_country', 'cookidoo_language']);
     const country = settings.cookidoo_country || 'es';
     const language = settings.cookidoo_language || 'es-ES';
     const locale = language.split('-')[0];
@@ -1161,14 +1150,15 @@ app.get('/api/cookidoo/search', async (req, res) => {
 });
 
 app.post('/api/cookidoo/predefined', async (req, res) => {
+  const menuId = getMenuId(req);
   let jar;
   try {
-    jar = await ensureCookidooAuth();
+    jar = await ensureCookidooAuth(menuId);
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
   try {
-    const settings = await getSettings(['cookidoo_country', 'cookidoo_language']);
+    const settings = await getSettings(menuId, ['cookidoo_country', 'cookidoo_language']);
     const country = settings.cookidoo_country || 'es';
     const language = settings.cookidoo_language || 'es-ES';
     const locale = language.split('-')[0];
@@ -1240,7 +1230,6 @@ app.post('/api/cookidoo/predefined', async (req, res) => {
     // Filter out already-imported recipes
     const cookidooIds = allResults.map(r => r.id).filter(Boolean);
     if (cookidooIds.length > 0) {
-      const menuId = parseInt(req.query.menuId) || 1;
       const { rows: existing } = await query(
         `SELECT cookidooId FROM recipes WHERE cookidooId = ANY($1) AND menu_id = $2`,
         [cookidooIds, menuId]
@@ -1261,18 +1250,19 @@ app.post('/api/cookidoo/predefined', async (req, res) => {
 });
 
 app.post('/api/cookidoo/add-to-shopping-list', async (req, res) => {
+  const menuId = getMenuId(req);
   const { recipeIds } = req.body;
   if (!Array.isArray(recipeIds) || recipeIds.length === 0) {
     return res.status(400).json({ error: 'recipeIds debe ser un array no vacío' });
   }
   let jar;
   try {
-    jar = await ensureCookidooAuth();
+    jar = await ensureCookidooAuth(menuId);
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
   try {
-    const settings = await getSettings(['cookidoo_country', 'cookidoo_language']);
+    const settings = await getSettings(menuId, ['cookidoo_country', 'cookidoo_language']);
     const country = settings.cookidoo_country || 'es';
     const language = settings.cookidoo_language || 'es-ES';
     const apiRes = await fetch(`https://cookidoo.${country}/shopping/${language}/recipes/add`, {
@@ -1290,7 +1280,7 @@ app.post('/api/cookidoo/add-to-shopping-list', async (req, res) => {
       return res.json({ ok: true, data });
     }
     if (apiRes.status === 401) {
-      const settings = await getSettings(['cookidoo_email']);
+      const settings = await getSettings(menuId, ['cookidoo_email']);
       const key = getCookieJarKey(settings.cookidoo_email || '');
       cookidooCookieJars.set(key, {});
       return res.status(401).json({ error: 'Sesión expirada. Vuelve a iniciar sesión.' });
@@ -1303,18 +1293,19 @@ app.post('/api/cookidoo/add-to-shopping-list', async (req, res) => {
 });
 
 app.post('/api/cookidoo/add-to-calendar', async (req, res) => {
+  const menuId = getMenuId(req);
   const { entries } = req.body;
   if (!Array.isArray(entries) || entries.length === 0) {
     return res.status(400).json({ error: 'entries debe ser un array no vacío de { cookidooId, date }' });
   }
   let jar;
   try {
-    jar = await ensureCookidooAuth();
+    jar = await ensureCookidooAuth(menuId);
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
   try {
-    const settings = await getSettings(['cookidoo_country', 'cookidoo_language']);
+    const settings = await getSettings(menuId, ['cookidoo_country', 'cookidoo_language']);
     const country = settings.cookidoo_country || 'es';
     const language = settings.cookidoo_language || 'es-ES';
 
@@ -1375,7 +1366,7 @@ app.put('/api/settings', authMiddleware, async (req, res) => {
     await query(
       `INSERT INTO settings (key, value, menu_id) VALUES ($1, $2, $3)
        ON CONFLICT (key, menu_id) DO UPDATE SET value = $2`,
-      [key, value, menuId]
+      [key, cleanSettingValue(key, value), menuId]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -1397,7 +1388,7 @@ app.put('/api/settings/batch', authMiddleware, async (req, res) => {
         await client.query(
           `INSERT INTO settings (key, value, menu_id) VALUES ($1, $2, $3)
            ON CONFLICT (key, menu_id) DO UPDATE SET value = $2`,
-          [entry.key, entry.value, menuId]
+          [entry.key, cleanSettingValue(entry.key, entry.value), menuId]
         );
       }
     }
