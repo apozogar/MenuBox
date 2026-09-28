@@ -54,14 +54,6 @@ app.use(cors());
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(bodyParser.json());
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Demasiadas peticiones, espera 15 minutos.' },
-});
-
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -70,7 +62,6 @@ const authLimiter = rateLimit({
   message: { error: 'Demasiados intentos, espera 15 minutos.' },
 });
 
-app.use('/api', limiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
